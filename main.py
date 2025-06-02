@@ -6,10 +6,16 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Environment variables
+PORT = int(os.getenv("PORT", 8000))
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 app = FastAPI(
     title="Waitlist API",
@@ -20,7 +26,7 @@ app = FastAPI(
 # CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Limit in production
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -138,4 +144,12 @@ async def submit(submission: WaitlistSubmission) -> dict:
 @app.get("/health")
 async def health_check() -> dict:
     """Health check endpoint"""
-    return {"status": "healthy"} 
+    return {
+        "status": "healthy",
+        "environment": ENVIRONMENT,
+        "port": PORT
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT) 

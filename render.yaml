@@ -7,3 +7,12 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: ENVIRONMENT
+        value: production
+      - key: ALLOWED_ORIGINS
+        value: "https://your-frontend-domain.com,http://localhost:3000"
+      - key: PORT
+        fromService:
+          type: web
+          name: waitlist-api
+          envVarKey: PORT
