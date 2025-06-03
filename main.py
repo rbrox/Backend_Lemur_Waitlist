@@ -14,7 +14,11 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 PORT = int(os.getenv("PORT", 8000))
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS", 
+    "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:5175,"
+    "https://www.thelemur.ai,https://thelemur.ai,https://lemurai.vercel.app,https://lemur-ai.vercel.app"
+).split(",")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 app = FastAPI(
@@ -23,13 +27,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware configuration
+# CORS middleware configuration with more specific settings
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
+    expose_headers=["Content-Length"],
+    max_age=600,  # Cache preflight requests for 10 minutes
 )
 
 # Pydantic model for form validation
@@ -113,6 +119,9 @@ async def submit(submission: WaitlistSubmission) -> dict:
         HTTPException: If submission fails or data is invalid
     """
     try:
+        # Log incoming submission
+        logger.info(f"Received submission from: {submission.email}")
+        
         # Prepare submission data
         submission_data = {
             "first_name": submission.first_name,
@@ -135,7 +144,7 @@ async def submit(submission: WaitlistSubmission) -> dict:
         SUBMISSIONS_FILE.write_text(json.dumps(submissions, indent=2))
         
         logger.info(f"Successfully added submission for {submission.email}")
-        return {"status": "success"}
+        return {"status": "success", "message": "Thank you for joining our waitlist!"}
         
     except Exception as e:
         logger.error(f"Failed to process submission: {str(e)}")
@@ -147,9 +156,16 @@ async def health_check() -> dict:
     return {
         "status": "healthy",
         "environment": ENVIRONMENT,
-        "port": PORT
+        "port": PORT,
+        "timestamp": datetime.now().isoformat()
     }
+
+# Add OPTIONS handler for the submit endpoint to help with CORS preflight
+@app.options("/submit")
+async def options_submit():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=PORT) 
+    logger.info(f"Starting server on port {PORT} with allowed origins: {ALLOWED_ORIGINS}")
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
