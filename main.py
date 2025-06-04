@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from typing import List
 import json
 import logging
@@ -14,11 +15,6 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 PORT = int(os.getenv("PORT", 8000))
-ALLOWED_ORIGINS = os.getenv(
-    "ALLOWED_ORIGINS", 
-    "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:5175,"
-    "https://www.thelemur.ai,https://thelemur.ai,https://lemurai.vercel.app,https://lemur-ai.vercel.app"
-).split(",")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 app = FastAPI(
@@ -27,22 +23,22 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware configuration with more specific settings
+# CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE"],  # Added DELETE method
     allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
     expose_headers=["Content-Length"],
-    max_age=600,  # Cache preflight requests for 10 minutes
+    max_age=600,
 )
 
 # Pydantic model for form validation
 class WaitlistSubmission(BaseModel):
     first_name: str
     last_name: str
-    email: EmailStr
+    email: str
     company: str
     role: str
     team_size: str
@@ -64,66 +60,62 @@ class WaitlistSubmission(BaseModel):
 # Create submissions.json if it doesn't exist
 SUBMISSIONS_FILE = Path("submissions.json")
 if not SUBMISSIONS_FILE.exists():
-    # Initialize with some example data
-    example_data = [
-        {
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "john.doe@example.com",
-            "company": "Acme Corp",
-            "role": "Product Manager",
-            "team_size": "10-50",
-            "challenges": ["Meeting Overload", "Calendar Management"],
-            "timestamp": datetime.now().isoformat()
-        },
-        {
-            "first_name": "Jane",
-            "last_name": "Smith",
-            "email": "jane.smith@example.com",
-            "company": "TechStart",
-            "role": "Engineering Manager",
-            "team_size": "50-200",
-            "challenges": ["Team Coordination", "Project Planning"],
-            "timestamp": datetime.now().isoformat()
-        }
-    ]
-    SUBMISSIONS_FILE.write_text(json.dumps(example_data, indent=2))
+    SUBMISSIONS_FILE.write_text(json.dumps([], indent=2))
+
+def read_submissions() -> List[dict]:
+    """Read submissions from JSON file with error handling"""
+    try:
+        return json.loads(SUBMISSIONS_FILE.read_text())
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON in submissions file, resetting to empty list")
+        SUBMISSIONS_FILE.write_text(json.dumps([], indent=2))
+        return []
+    except Exception as e:
+        logger.error(f"Error reading submissions file: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to read submissions")
+
+def write_submissions(submissions: List[dict]) -> None:
+    """Write submissions to JSON file with error handling"""
+    try:
+        SUBMISSIONS_FILE.write_text(json.dumps(submissions, indent=2))
+    except Exception as e:
+        logger.error(f"Error writing to submissions file: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save submission")
 
 @app.get("/submissions", response_model=List[dict])
 async def get_submissions() -> List[dict]:
-    """
-    Get all waitlist submissions.
-    
-    Returns:
-        List[dict]: List of all submissions with their details
-    """
+    """Get all waitlist submissions."""
+    return read_submissions()
+
+@app.get("/download-submissions")
+async def download_submissions():
+    """Download all submissions as a JSON file."""
     try:
-        submissions = json.loads(SUBMISSIONS_FILE.read_text())
-        return submissions
+        submissions = read_submissions()
+        return JSONResponse(
+            content=submissions,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename=submissions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            }
+        )
     except Exception as e:
-        logger.error(f"Failed to read submissions: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to read submissions")
+        logger.error(f"Failed to prepare download: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to prepare download")
 
 @app.post("/submit", response_model=dict)
 async def submit(submission: WaitlistSubmission) -> dict:
-    """
-    Handle waitlist form submissions and store in JSON file.
-    
-    Args:
-        submission: WaitlistSubmission model containing form data
-        
-    Returns:
-        dict: Status response
-        
-    Raises:
-        HTTPException: If submission fails or data is invalid
-    """
+    """Handle waitlist form submissions and store in JSON file."""
     try:
-        # Log incoming submission
         logger.info(f"Received submission from: {submission.email}")
         
-        # Prepare submission data
+        submissions = read_submissions()
+        
+        # Calculate the next ID (1-based indexing)
+        next_id = len(submissions) + 1
+        
         submission_data = {
+            "id": next_id,
             "first_name": submission.first_name,
             "last_name": submission.last_name,
             "email": submission.email,
@@ -134,14 +126,9 @@ async def submit(submission: WaitlistSubmission) -> dict:
             "timestamp": datetime.now().isoformat()
         }
         
-        # Read existing submissions
-        submissions = json.loads(SUBMISSIONS_FILE.read_text())
-        
-        # Append new submission
+        # Append to the end of the list
         submissions.append(submission_data)
-        
-        # Write back to file
-        SUBMISSIONS_FILE.write_text(json.dumps(submissions, indent=2))
+        write_submissions(submissions)
         
         logger.info(f"Successfully added submission for {submission.email}")
         return {"status": "success", "message": "Thank you for joining our waitlist!"}
@@ -149,6 +136,44 @@ async def submit(submission: WaitlistSubmission) -> dict:
     except Exception as e:
         logger.error(f"Failed to process submission: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/submissions/{submission_id}")
+async def delete_submission(submission_id: int) -> dict:
+    """Delete a submission by its ID."""
+    try:
+        submissions = read_submissions()
+        
+        # Find the submission with the given ID
+        submission_index = next(
+            (index for index, sub in enumerate(submissions) if sub["id"] == submission_id),
+            None
+        )
+        
+        if submission_index is None:
+            raise HTTPException(status_code=404, detail=f"Submission with ID {submission_id} not found")
+        
+        # Remove the submission
+        deleted_submission = submissions.pop(submission_index)
+        
+        # Update IDs for remaining submissions
+        for i, submission in enumerate(submissions, start=1):
+            submission["id"] = i
+        
+        # Save the updated submissions
+        write_submissions(submissions)
+        
+        logger.info(f"Successfully deleted submission with ID {submission_id}")
+        return {
+            "status": "success",
+            "message": f"Submission {submission_id} deleted successfully",
+            "deleted_submission": deleted_submission
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete submission: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete submission")
 
 @app.get("/health")
 async def health_check() -> dict:
@@ -160,12 +185,7 @@ async def health_check() -> dict:
         "timestamp": datetime.now().isoformat()
     }
 
-# Add OPTIONS handler for the submit endpoint to help with CORS preflight
-@app.options("/submit")
-async def options_submit():
-    return {"status": "ok"}
-
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Starting server on port {PORT} with allowed origins: {ALLOWED_ORIGINS}")
+    logger.info(f"Starting server on port {PORT} with allowed origins: *")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
