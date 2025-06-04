@@ -36,24 +36,12 @@ app.add_middleware(
 
 # Pydantic model for form validation
 class WaitlistSubmission(BaseModel):
-    first_name: str
-    last_name: str
     email: str
-    company: str
-    role: str
-    team_size: str
-    challenges: List[str]
 
     class Config:
         json_schema_extra = {
             "example": {
-                "first_name": "John",
-                "last_name": "Doe",
-                "email": "john.doe@example.com",
-                "company": "Acme Corp",
-                "role": "Product Manager",
-                "team_size": "10-50",
-                "challenges": ["Meeting Overload", "Calendar Management"]
+                "email": "user@example.com"
             }
         }
 
@@ -116,13 +104,7 @@ async def submit(submission: WaitlistSubmission) -> dict:
         
         submission_data = {
             "id": next_id,
-            "first_name": submission.first_name,
-            "last_name": submission.last_name,
             "email": submission.email,
-            "company": submission.company,
-            "role": submission.role,
-            "team_size": submission.team_size,
-            "challenges": submission.challenges,
             "timestamp": datetime.now().isoformat()
         }
         
