@@ -32,4 +32,5 @@ ENV/
 *.swo
 
 # Project specific
-submissions.json 
+submissions.json
+.env

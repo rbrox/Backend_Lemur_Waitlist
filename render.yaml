@@ -16,3 +16,16 @@ services:
           type: web
           name: waitlist-api
           envVarKey: PORT
+      # Email configuration - Set these in Render dashboard
+      - key: SMTP_SERVER
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USERNAME
+        value: ""  # Set this in Render dashboard
+      - key: SMTP_PASSWORD
+        value: ""  # Set this in Render dashboard (use App Password for Gmail)
+      - key: FROM_EMAIL
+        value: ""  # Set this in Render dashboard (usually same as SMTP_USERNAME)
+      - key: FROM_NAME
+        value: "Lemur Waitlist"
